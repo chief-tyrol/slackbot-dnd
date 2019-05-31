@@ -2,6 +2,7 @@ FROM python:2.7-alpine
 
 RUN apk add --no-cache build-base \
   && pip install twisted \
+  && pip install requests \
   && apk del build-base
 
 EXPOSE 8080

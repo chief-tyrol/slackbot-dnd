@@ -5,6 +5,8 @@ from twisted.web.server import Site
 from twisted.web.resource import Resource
 from twisted.internet import reactor
 
+import requests
+
 NAME = 'xanathar'
 LIST_TYPE = type([])
 
@@ -15,6 +17,11 @@ class Relay(Resource):
         self.commands['/divider'] = self.divider
         self.commands['/rollfor'] = self.roll_for
 
+    def list_to_value(self, value):
+        if type(value) == LIST_TYPE and len(value) > 0:
+            return value[0]
+        return value
+
     def divider(self, request):
         response = {
             'blocks': [{"type": "divider"}],
@@ -23,10 +30,7 @@ class Relay(Resource):
         return json.dumps(response)
 
     def roll_for(self, request):
-        t = request.args['text']
-
-        if type(t) == LIST_TYPE and len(t) > 0:
-            t = str(t[0])
+        t = str(self.list_to_value(request.args['text']))
 
         if len(t) == 0:
             t = 'initiative'
@@ -37,6 +41,9 @@ class Relay(Resource):
         t = t.replace('_', '')
         t = t.replace('~', '')
 
+        response_url = str(self.list_to_value(request.args['response_url']))
+        user_id = str(self.list_to_value(request.args['user_id']))
+
         response = {
             'blocks': [
                 {
@@ -46,13 +53,16 @@ class Relay(Resource):
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "*Roll for {}*".format(t)
+                        "text": "<@{}> says *\"roll for {}!\"* :game_die::game_die::game_die:".format(user_id, t)
                     }
                 }
             ],
             "response_type": "in_channel"
         }
-        return json.dumps(response)
+
+        requests.post(response_url, data=json.dumps(response), headers={'content-type': 'application/json'}, timeout=60)
+
+        return ''
 
     def render_GET(self, request):
         return '<html><body>{} is running.</body></html>'.format(NAME)
@@ -64,6 +74,7 @@ class Relay(Resource):
             command = command[0]
 
         if command in self.commands:
+            request.setResponseCode(200)
             request.responseHeaders.addRawHeader('Content-Type', 'application/json')
             return self.commands[command](request)
         
