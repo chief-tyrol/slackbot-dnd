@@ -14,7 +14,7 @@
  */
 @Library('gryphon-zone/pipeline-shared-library@master') _
 
-dockerImagePipeline('gryphon-zone') {
+dockerImagePipeline('chief-tyrol') {
 
     // run build daily
     jobProperties([pipelineTriggers([cron('@daily')])])
