@@ -134,8 +134,7 @@ class Relay(Resource):
                 )
 
             request.setResponseCode(200)
-            request.responseHeaders.addRawHeader('Content-Type', 'application/json')
-            return self.to_bytes('{}')
+            return self.to_bytes('')
 
         except MissingParameterException as e:
             return BadRequestErrorPage(str(e)).render(request)
