@@ -10,15 +10,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM python:2.7-alpine
+FROM python:3-alpine
+
+COPY requirements.txt /tmp/requirements.txt
+COPY printconfig.sh /tmp/printconfig.sh
 
 RUN apk add --no-cache build-base \
-  && pip install twisted \
-  && pip install requests \
+  && pip install --upgrade pip \
+  && pip install --upgrade -r /tmp/requirements.txt \
+  && sh /tmp/printconfig.sh \
+  && pip uninstall --yes pip \
   && apk del build-base
 
 EXPOSE 8080
 
-COPY python/ /tmp
+COPY python/ /tmp/python
 
-ENTRYPOINT ["python", "/tmp/main.py"]
+ENTRYPOINT ["python", "/tmp/python/main.py"]

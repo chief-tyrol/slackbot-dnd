@@ -1,50 +1,99 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
 import json
-import sys
+
 from twisted.web.server import Site
 from twisted.web.resource import Resource
 from twisted.internet import reactor
+from twisted.web.server import Request
+from twisted.web.resource import ErrorPage
 
 import requests
 
-NAME = 'xanathar'
-LIST_TYPE = type([])
+
+class BadRequestErrorPage(ErrorPage):
+
+    def __init__(self, message="Bad request"):
+        super().__init__(400, "Bad Request", message)
+
+
+class MissingParameterException(Exception):
+
+    def __init__(self, name: str):
+        super().__init__('Parameter "{}" is required but was not provided'.format(name))
+
+
+class InvalidCommandException(Exception):
+
+    def __init__(self, name: str):
+        super().__init__('Command "{}" is unsupported'.format(name))
+
 
 class Relay(Resource):
 
     def __init__(self):
-        self.commands = {}
-        self.commands['/divider'] = self.divider
-        self.commands['/rollfor'] = self.roll_for
+        super().__init__()
 
-    def list_to_value(self, value):
-        if type(value) == LIST_TYPE and len(value) > 0:
-            return value[0]
-        return value
+        self.TYPE_LIST = type([])
+        self.TYPE_STR = type('')
+        self.TYPE_BYTES = type(b'')
 
-    def divider(self, request):
-        response = {
-            'blocks': [{"type": "divider"}],
+        self.commands = {
+            '/divider': self.command_divider,
+            '/rollfor': self.command_roll_for
+        }
+
+    def to_bytes(self, value):
+        """
+        :param value: either a str or a bytes object
+        :return: a bytes object
+        """
+        return value if type(value) == self.TYPE_BYTES else value.encode('UTF-8')
+
+    def to_str(self, value):
+        """
+        :param value: either a str or a bytes object
+        :return: a str object
+        """
+        return value if type(value) == self.TYPE_STR else str(value, encoding='UTF-8')
+
+    def unwrap_list(self, value):
+        return value[0] if type(value) == self.TYPE_LIST and len(value) > 0 else value
+
+    def read_required_parameter(self, name: str, request: Request):
+        name_bytes = self.to_bytes(name)
+
+        if name_bytes in request.args.keys():
+            return request.args[name_bytes]
+
+        raise MissingParameterException(name)
+
+    def read_required_string_parameter(self, name: str, request: Request):
+        return self.to_str(self.unwrap_list(self.read_required_parameter(name, request)))
+
+    def command_divider(self, request: Request):
+        return {
+            'blocks': [
+                {
+                    "type": "divider"
+                }
+            ],
             "response_type": "in_channel"
         }
-        return json.dumps(response)
 
-    def roll_for(self, request):
-        t = str(self.list_to_value(request.args['text']))
+    def command_roll_for(self, request: Request):
+        text = self.read_required_string_parameter('text', request)
+        user_id = self.read_required_string_parameter('user_id', request)
 
-        if len(t) == 0:
-            t = 'initiative'
-        else:
-            t = str(t)
+        text = text.replace('*', '')
+        text = text.replace('_', '')
+        text = text.replace('~', '')
+        text = text.strip()
 
-        t = t.replace('*', '')
-        t = t.replace('_', '')
-        t = t.replace('~', '')
+        if len(text) == 0:
+            text = 'initiative'
 
-        response_url = str(self.list_to_value(request.args['response_url']))
-        user_id = str(self.list_to_value(request.args['user_id']))
-
-        response = {
+        return {
             'blocks': [
                 {
                     "type": "divider"
@@ -53,40 +102,54 @@ class Relay(Resource):
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "<@{}> says *\"roll for {}!\"* :game_die::game_die::game_die:".format(user_id, t)
+                        "text": "<@{}> says *\"roll for {}!\"* :game_die::game_die::game_die:".format(user_id, text)
                     }
                 }
             ],
             "response_type": "in_channel"
         }
 
-        requests.post(response_url, data=json.dumps(response), headers={'content-type': 'application/json'}, timeout=60)
+    # noinspection PyMethodMayBeStatic,PyPep8Naming
+    def render_GET(self, request: Request):
+        return self.to_bytes('<html><body>Slack bot is running.</body></html>')
 
-        return ''
+    # noinspection PyPep8Naming
+    def render_POST(self, request: Request):
+        try:
+            command = self.read_required_string_parameter('command', request)
 
-    def render_GET(self, request):
-        return '<html><body>{} is running.</body></html>'.format(NAME)
+            if command not in self.commands:
+                raise InvalidCommandException(command)
 
-    def render_POST(self, request):
-        command = request.args['command']
+            response = self.commands[command](request)
 
-        if type(command) == LIST_TYPE:
-            command = command[0]
+            if response is not None:
+                requests.post(
+                    self.read_required_string_parameter('response_url', request),
+                    timeout=15,
+                    data=json.dumps(response),
+                    headers={
+                        'Content-Type': 'application/json'
+                    }
+                )
 
-        if command in self.commands:
             request.setResponseCode(200)
             request.responseHeaders.addRawHeader('Content-Type', 'application/json')
-            return self.commands[command](request)
-        
-        request.setResponseCode(404)
-        return '<html><body>Command "{}" not recognized</body></html>'.format(command)
+            return self.to_bytes('{}')
+
+        except MissingParameterException as e:
+            return BadRequestErrorPage(str(e)).render(request)
+
+        except InvalidCommandException as e:
+            return BadRequestErrorPage(str(e)).render(request)
+
 
 if __name__ == '__main__':
-    cogsworth = Resource()
-    cogsworth.putChild(NAME, Relay())
+    slackbot = Resource()
+    slackbot.putChild(b'dnd', Relay())
 
     root = Resource()
-    root.putChild('webhook', cogsworth)
+    root.putChild(b'webhook', slackbot)
 
     reactor.listenTCP(8080, Site(root))
     reactor.run()
